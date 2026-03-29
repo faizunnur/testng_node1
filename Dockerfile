@@ -1,35 +1,40 @@
+# Stage 1: Build React frontend
+FROM node:18-alpine AS client-builder
+
+WORKDIR /app/client
+
+COPY client/package.json ./
+RUN npm install --silent
+
+COPY client/ ./
+RUN npm run build
+
+# Stage 2: Build and run the Node.js server
 FROM node:18-alpine
 
 WORKDIR /app
 
-# Install dependencies for native modules
-RUN apk add --no-cache python3 make g++
-
-# Copy package files
-COPY package*.json ./
-
-# Install server dependencies
+# Install dependencies
+COPY package.json ./
 RUN npm install --production
 
-# Copy client package files and install
-COPY client/package*.json ./client/
-RUN cd client && npm install
+# Copy server source files
+COPY server.js ./
+COPY db.js ./
 
-# Copy all source files
-COPY . .
+# Copy built React frontend from stage 1
+COPY --from=client-builder /app/client/build ./client/build
 
-# Build React frontend
-RUN cd client && npm run build
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodeuser -u 1001 && \
+    chown -R nodeuser:nodejs /app
 
-# Expose port
+USER nodeuser
+
 EXPOSE 3000
 
-# Set production environment
-ENV NODE_ENV=production
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:3000/health || exit 1
 
-# Start the server
 CMD ["node", "server.js"]
