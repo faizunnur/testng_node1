@@ -4,6 +4,7 @@ client/build
 npm-debug.log
 .env
 .git
-.github
+.gitignore
 *.md
-terraform
+terraform/
+.github/
