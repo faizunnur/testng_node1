@@ -6,6 +6,7 @@ terraform {
       version = "~> 5.0"
     }
   }
+
   backend "s3" {
     bucket = "testng-node1-terraform-state"
     key    = "testng_node1/terraform.tfstate"
@@ -17,6 +18,7 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Variables
 variable "aws_region" {
   description = "AWS region"
   type        = string
@@ -42,21 +44,20 @@ variable "db_password" {
 }
 
 variable "ecr_image_uri" {
-  description = "ECR image URI for the application"
+  description = "ECR image URI"
   type        = string
 }
 
-# VPC
+# VPC and Networking
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
-  tags = { Name = "${var.app_name}-vpc" }
-}
 
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-  tags   = { Name = "${var.app_name}-igw" }
+  tags = {
+    Name        = "${var.app_name}-vpc"
+    Environment = var.environment
+  }
 }
 
 resource "aws_subnet" "public_a" {
@@ -64,7 +65,10 @@ resource "aws_subnet" "public_a" {
   cidr_block              = "10.0.1.0/24"
   availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
-  tags = { Name = "${var.app_name}-public-a" }
+
+  tags = {
+    Name = "${var.app_name}-public-subnet-a"
+  }
 }
 
 resource "aws_subnet" "public_b" {
@@ -72,30 +76,51 @@ resource "aws_subnet" "public_b" {
   cidr_block              = "10.0.2.0/24"
   availability_zone       = "${var.aws_region}b"
   map_public_ip_on_launch = true
-  tags = { Name = "${var.app_name}-public-b" }
+
+  tags = {
+    Name = "${var.app_name}-public-subnet-b"
+  }
 }
 
 resource "aws_subnet" "private_a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.3.0/24"
   availability_zone = "${var.aws_region}a"
-  tags = { Name = "${var.app_name}-private-a" }
+
+  tags = {
+    Name = "${var.app_name}-private-subnet-a"
+  }
 }
 
 resource "aws_subnet" "private_b" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.4.0/24"
   availability_zone = "${var.aws_region}b"
-  tags = { Name = "${var.app_name}-private-b" }
+
+  tags = {
+    Name = "${var.app_name}-private-subnet-b"
+  }
+}
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "${var.app_name}-igw"
+  }
 }
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
+
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.main.id
   }
-  tags = { Name = "${var.app_name}-public-rt" }
+
+  tags = {
+    Name = "${var.app_name}-public-rt"
+  }
 }
 
 resource "aws_route_table_association" "public_a" {
@@ -111,76 +136,103 @@ resource "aws_route_table_association" "public_b" {
 # Security Groups
 resource "aws_security_group" "alb" {
   name        = "${var.app_name}-alb-sg"
-  description = "ALB security group"
+  description = "Security group for ALB"
   vpc_id      = aws_vpc.main.id
+
   ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  tags = { Name = "${var.app_name}-alb-sg" }
+
+  tags = {
+    Name = "${var.app_name}-alb-sg"
+  }
 }
 
 resource "aws_security_group" "ecs" {
   name        = "${var.app_name}-ecs-sg"
-  description = "ECS tasks security group"
+  description = "Security group for ECS tasks"
   vpc_id      = aws_vpc.main.id
+
   ingress {
     from_port       = 3000
     to_port         = 3000
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
+
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  tags = { Name = "${var.app_name}-ecs-sg" }
+
+  tags = {
+    Name = "${var.app_name}-ecs-sg"
+  }
 }
 
 resource "aws_security_group" "rds" {
   name        = "${var.app_name}-rds-sg"
-  description = "RDS security group"
+  description = "Security group for RDS PostgreSQL"
   vpc_id      = aws_vpc.main.id
+
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.ecs.id]
   }
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+
+  tags = {
+    Name = "${var.app_name}-rds-sg"
   }
-  tags = { Name = "${var.app_name}-rds-sg" }
+}
+
+# ECR Repository
+resource "aws_ecr_repository" "app" {
+  name                 = var.app_name
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = {
+    Name        = var.app_name
+    Environment = var.environment
+  }
 }
 
 # RDS PostgreSQL
 resource "aws_db_subnet_group" "main" {
   name       = "${var.app_name}-db-subnet-group"
   subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
-  tags       = { Name = "${var.app_name}-db-subnet-group" }
+
+  tags = {
+    Name = "${var.app_name}-db-subnet-group"
+  }
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier             = "${var.app_name}-postgres"
+  identifier             = "${var.app_name}-db"
   engine                 = "postgres"
   engine_version         = "15.4"
   instance_class         = "db.t3.micro"
@@ -194,54 +246,63 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   skip_final_snapshot    = false
   final_snapshot_identifier = "${var.app_name}-final-snapshot"
-  backup_retention_period = 7
-  deletion_protection    = false
-  tags = { Name = "${var.app_name}-postgres" }
-}
+  multi_az               = false
+  publicly_accessible    = false
+  deletion_protection    = true
 
-# ECR Repository
-resource "aws_ecr_repository" "app" {
-  name                 = var.app_name
-  image_tag_mutability = "MUTABLE"
-  image_scanning_configuration {
-    scan_on_push = true
+  tags = {
+    Name        = "${var.app_name}-postgres"
+    Environment = var.environment
   }
-  tags = { Name = var.app_name }
 }
 
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
   name = "${var.app_name}-cluster"
+
   setting {
     name  = "containerInsights"
     value = "enabled"
   }
-  tags = { Name = "${var.app_name}-cluster" }
-}
 
-# IAM Role for ECS Task Execution
-resource "aws_iam_role" "ecs_task_execution" {
-  name = "${var.app_name}-ecs-task-execution"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
-  role       = aws_iam_role.ecs_task_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+  tags = {
+    Name        = "${var.app_name}-cluster"
+    Environment = var.environment
+  }
 }
 
 # CloudWatch Log Group
 resource "aws_cloudwatch_log_group" "app" {
   name              = "/ecs/${var.app_name}"
   retention_in_days = 30
-  tags = { Name = "${var.app_name}-logs" }
+
+  tags = {
+    Name        = "${var.app_name}-logs"
+    Environment = var.environment
+  }
+}
+
+# IAM Role for ECS Task Execution
+resource "aws_iam_role" "ecs_task_execution" {
+  name = "${var.app_name}-ecs-task-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 # ECS Task Definition
@@ -252,50 +313,65 @@ resource "aws_ecs_task_definition" "app" {
   cpu                      = "512"
   memory                   = "1024"
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  container_definitions = jsonencode([{
-    name  = var.app_name
-    image = var.ecr_image_uri
-    portMappings = [{
-      containerPort = 3000
-      hostPort      = 3000
-      protocol      = "tcp"
-    }]
-    environment = [
-      { name = "NODE_ENV",     value = "production" },
-      { name = "PORT",         value = "3000" },
-      { name = "DB_HOST",      value = aws_db_instance.postgres.address },
-      { name = "DB_PORT",      value = "5432" },
-      { name = "DB_NAME",      value = "testng_node1" },
-      { name = "DB_USER",      value = "postgres" },
-      { name = "DB_PASSWORD",  value = var.db_password },
-      { name = "DB_SSL",       value = "true" }
-    ]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = aws_cloudwatch_log_group.app.name
-        "awslogs-region"        = var.aws_region
-        "awslogs-stream-prefix" = "ecs"
+
+  container_definitions = jsonencode([
+    {
+      name  = var.app_name
+      image = var.ecr_image_uri
+      portMappings = [
+        {
+          containerPort = 3000
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+        { name = "NODE_ENV", value = "production" },
+        { name = "PORT", value = "3000" },
+        { name = "DB_HOST", value = aws_db_instance.postgres.address },
+        { name = "DB_PORT", value = "5432" },
+        { name = "DB_NAME", value = "testng_node1" },
+        { name = "DB_USER", value = "postgres" },
+        { name = "DB_PASSWORD", value = var.db_password },
+        { name = "DB_SSL", value = "true" }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.app.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+      healthCheck = {
+        command     = ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+        interval    = 30
+        timeout     = 10
+        retries     = 3
+        startPeriod = 60
       }
     }
-    healthCheck = {
-      command     = ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
-      interval    = 30
-      timeout     = 5
-      retries     = 3
-      startPeriod = 60
-    }
-  }])
+  ])
+
+  tags = {
+    Name        = "${var.app_name}-task"
+    Environment = var.environment
+  }
 }
 
-# ALB
+# Application Load Balancer
 resource "aws_lb" "main" {
   name               = "${var.app_name}-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
-  tags = { Name = "${var.app_name}-alb" }
+
+  enable_deletion_protection = false
+
+  tags = {
+    Name        = "${var.app_name}-alb"
+    Environment = var.environment
+  }
 }
 
 resource "aws_lb_target_group" "app" {
@@ -304,22 +380,27 @@ resource "aws_lb_target_group" "app" {
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
+
   health_check {
     enabled             = true
+    path                = "/health"
     healthy_threshold   = 2
     unhealthy_threshold = 3
-    timeout             = 5
+    timeout             = 10
     interval            = 30
-    path                = "/health"
     matcher             = "200"
   }
-  tags = { Name = "${var.app_name}-tg" }
+
+  tags = {
+    Name = "${var.app_name}-tg"
+  }
 }
 
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
-  port              = 80
+  port              = "80"
   protocol          = "HTTP"
+
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
@@ -333,32 +414,44 @@ resource "aws_ecs_service" "app" {
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = 1
   launch_type     = "FARGATE"
+
   network_configuration {
     subnets          = [aws_subnet.public_a.id, aws_subnet.public_b.id]
     security_groups  = [aws_security_group.ecs.id]
     assign_public_ip = true
   }
+
   load_balancer {
     target_group_arn = aws_lb_target_group.app.arn
     container_name   = var.app_name
     container_port   = 3000
   }
+
   depends_on = [aws_lb_listener.http]
-  tags = { Name = "${var.app_name}-service" }
+
+  tags = {
+    Name        = "${var.app_name}-service"
+    Environment = var.environment
+  }
 }
 
 # Outputs
 output "alb_dns_name" {
-  description = "ALB DNS name"
+  description = "DNS name of the Application Load Balancer"
   value       = aws_lb.main.dns_name
 }
 
 output "ecr_repository_url" {
-  description = "ECR repository URL"
+  description = "URL of the ECR repository"
   value       = aws_ecr_repository.app.repository_url
 }
 
 output "rds_endpoint" {
-  description = "RDS endpoint"
-  value       = aws_db_instance.postgres.address
+  description = "RDS PostgreSQL endpoint"
+  value       = aws_db_instance.postgres.endpoint
+}
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name"
+  value       = aws_ecs_cluster.main.name
 }
