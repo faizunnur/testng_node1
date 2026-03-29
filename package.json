@@ -1,13 +1,13 @@
 {
   "name": "testng_node1",
   "version": "1.0.0",
-  "description": "Full-stack Node.js project with Express, PostgreSQL, and React",
+  "description": "Full-stack Node.js application with Express, PostgreSQL, and React",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
     "build:client": "cd client && npm install && npm run build",
-    "install:all": "npm install && cd client && npm install"
+    "postinstall": "npm run build:client"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -16,9 +16,6 @@
     "pg": "^8.11.3"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "nodemon": "^3.0.1"
   }
 }
