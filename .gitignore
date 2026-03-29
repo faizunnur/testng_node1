@@ -1,10 +1,31 @@
+# Dependencies
 node_modules/
 client/node_modules/
+
+# Build outputs
 client/build/
+
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# Logs
+logs/
 *.log
 npm-debug.log*
+
+# Runtime
 .DS_Store
-dist/
-coverage/
-.nyc_output/
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/.terraform.lock.hcl
